@@ -1,6 +1,6 @@
 // This will run on board 2, connected in series between board 1 and pc
 // Purpose to take pc input, prompted board 1 for sensor reading, then relay reading to pc
-int baud = 115200;
+const long baud = 115200;
 
 // Temperature setting var
 bool celsius = true;
@@ -11,8 +11,8 @@ String currentMessage = String("");
 bool messageStarted = false;
 
 // Establish message framing
-char startChar = '<';
-char endChar = '>';
+const char startChar = '<';
+const char endChar = '>';
 
 
 void setup() {
