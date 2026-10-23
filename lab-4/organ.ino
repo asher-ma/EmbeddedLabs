@@ -3,7 +3,9 @@
 */
 #include "notes.h"
 
+#define CLK_FREQ 1.6e6    // 1.6 MHz
 #define DEB_THRESH 50000  // 50 ms
+#define PRESCALE 1
 
 /**
 * ==============================================================================
@@ -23,10 +25,10 @@
 * ==============================================================================
 */
 static const int FREQ_MAP[4][4] = {
-  { NOTE_C4, NOTE_CS4, NOTE_D4, NOTE_DS4 },
-  { NOTE_E4, NOTE_F4, NOTE_FS4, NOTE_G4 },
-  { NOTE_GS4, NOTE_A4, NOTE_AS4, NOTE_B4 },
-  { NOTE_C5, -1, 0, 1 }
+  { NOTE_C3, NOTE_CS3, NOTE_D3, NOTE_DS3 },
+  { NOTE_E3, NOTE_F3, NOTE_FS3, NOTE_G3 },
+  { NOTE_GS3, NOTE_A3, NOTE_AS3, NOTE_B3 },
+  { NOTE_C4, -1, 0, 1 }
 };
 
 static volatile unsigned long lastInterrupt = 0;
@@ -82,6 +84,16 @@ uint8_t getKeydown(uint8_t offset) {
   return 0x00;
 }
 
+void playFreq(uint16_t freq) {
+  OCR1A = static_cast<uint16_t>(CLK_FREQ / static_cast<float>(2 * PRESCALE * freq) - 1);
+  TCCR1A |= (1 << COM1A0);  // enable hardware toggle on pin 11
+}
+
+void stopFreq() {
+  TCCR1A &= ~(1 << COM1A0);
+  PORTB &= ~(1 << PORTB5);
+}
+
 /**
 * ==============================================================================
 * -  Arduino Built-Ins  --------------------------------------------------------
@@ -97,6 +109,15 @@ void setup() {
   PCICR |= (1 << PCIE2);
   PCMSK2 = 0xF0;
 
+  // Set Pin 11 (PB5) as output
+  DDRB |= (1 << DDB5);
+
+  // Timer 1 control registers
+  TCCR1A = 0;
+  TCCR1B = 0;
+  TCNT1  = 0;
+  TCCR1B |= (1 << WGM12) | (1 << CS10);
+
   Serial.begin(9600);
 }
 
@@ -110,6 +131,7 @@ void loop() {
     uint8_t kmc = log2(col) - 1;  // key map column
     uint8_t kmr = log2(row) - 1;  // key map row
     if (kmc < 0 || kmc >= 4 || kmr < 0 || kmr >= 4) {
+      stopFreq();
       sei();
       return;
     }
@@ -118,6 +140,7 @@ void loop() {
     if (abs(freq) <= 1) {
       Serial.print("Control = ");
     } else {
+      playFreq(freq);
       Serial.print("Frequency = ");
     }
     Serial.println(freq);
