@@ -34,7 +34,7 @@ volatile bool gap = true;
  */
 
 void initFreqTimer() {
-	// Setup timer 3 to generate a frequency designated by OCR1A
+	// Setup timer 3 to generate a frequency designated by OCR3A
 	// Timer 3 control registers
 	TCCR3A = 0;
 	TCCR3B = 0;
@@ -42,7 +42,7 @@ void initFreqTimer() {
 	TCCR3B |= (1 << WGM32); // mode 4
 	TCCR3B |= (1 << CS30); // no Prescaling
 
-	DDRE |= (1 << PE3); // enable pin output
+	DDRE |= (1 << PE3); // enable pin output to OC3A (PE3) (P5)
 }
 
 void initDelayTimer() {
@@ -65,7 +65,7 @@ void playFreq(uint16_t freq) {
 
 void stopFreq() {
 	TCCR3A &= ~(1 << COM3A0); 	// disconnect timer from pin
-	PORTE &= ~(1 << PORTE3); 		// pull pin down
+	PORTE &= ~(1 << PORTE3); 	// pull pin down
 }
 
 void setDelay(uint16_t ms) {
