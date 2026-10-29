@@ -14,8 +14,8 @@ static constexpr NoteContainer MARIO[] = {
     NOTE_G3(200), REST(600),    NOTE_G2(200), REST(600)
 };
 
-static constexpr double CLK_FREQ = 1.6e6;
-static constexpr uint16_t PRESCALE = 1;
+static constexpr double CLK_FREQ = 16e6;
+static constexpr uint16_t PRESCALE = 64;
 static constexpr uint8_t GAP = 20; // Gap between notes in ms
 
 /**
@@ -42,7 +42,7 @@ void initFreqTimer() {
 	TCCR3B = 0;
 	TCNT3 = 0;
 	TCCR3B |= (1 << WGM32); // mode 4
-	TCCR3B |= (1 << CS30); // no Prescaling
+	TCCR3B |= (1 << CS30) | (1 << CS31); // Set Timer 3 prescaler of 64
 
 	DDRE |= (1 << PE3); // enable pin output to OC3A (PE3) (P5)
 }
