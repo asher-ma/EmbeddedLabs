@@ -48,7 +48,7 @@ void initFreqTimer() {
 }
 
 void initDelayTimer() {
-	// Set up timer 1 to trigger interrupt designated by TCNT0
+	// Set up timer 1 to trigger interrupt designated by TCNT1
 	TIMSK1 |= (1 << TOIE1); // initialize timer interrupt
 
 	TCCR1A = TCCR1B = 0; // mode 0
