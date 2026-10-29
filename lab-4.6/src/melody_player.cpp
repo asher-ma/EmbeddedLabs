@@ -29,33 +29,51 @@ static constexpr char MAP[4][4] = {{'1', '2', '3', 'A'},
  * -  Constants  ---------------------------------------------------------------
  * =============================================================================
  */
-static constexpr double CLK_FREQ = 1.6e6;      // 1.6 MHz
+static constexpr double CLK_FREQ = 16e6;      // 16 MHz
 static constexpr uint16_t DEB_THRESH = 50000;  // 50 ms
-static constexpr uint16_t PRESCALE = 1;
+static constexpr uint16_t PRESCALE = 64;
+static constexpr uint8_t GAP = 20; // Gap between notes in ms
+static constexpr uint8_t SONG_OVER = 255;
 
 static volatile unsigned long lastInterrupt = 0;
 static volatile uint8_t prev = 0xF0;     // assume all high
 static volatile uint8_t changed = 0x00;  // assume no change
 static volatile bool intTriggered = false;
-static volatile bool playingSong = false;
 
 /**
- * ==============================================================================
- * -  Interrupt Service Routine ------------------------------------------------
- * ==============================================================================
+ * =============================================================================
+ * -  Globals  -----------------------------------------------------------------
+ * =============================================================================
  */
-ISR(PCINT2_vect) {
-	unsigned long currInterrupt = micros();
 
-	if (!intTriggered && !playingSong &&
-	    currInterrupt - lastInterrupt > DEB_THRESH) {
-		uint8_t curr = PINK;
-		changed = curr ^ prev;
-		prev = curr;
+const NoteContainer* curSong;
+uint8_t curLen;
+volatile uint8_t ni = 0; // Note index
+volatile bool gap = true;
 
-		intTriggered = true;  // do not enable interrupts until processed
-		lastInterrupt = currInterrupt;
-	}
+/**
+ * =============================================================================
+ * -  Timer Initializations ----------------------------------------------------
+ * =============================================================================
+ */
+
+void initFreqTimer() {
+	// Setup timer 3 to generate a frequency designated by OCR3A
+	// Timer 3 control registers
+	TCCR3A = 0;
+	TCCR3B = 0;
+	TCNT3 = 0;
+	TCCR3B |= (1 << WGM32); // mode 4
+	TCCR3B |= (1 << CS30) | (1 << CS31); // Set Timer 3 prescaler of 64
+
+	DDRE |= (1 << PE3); // enable pin output to OC3A (PE3) (P5)
+}
+
+void initDelayTimer() {
+	// Set up timer 1 to trigger interrupt designated by TCNT1
+	TIMSK1 |= (1 << TOIE1); // initialize timer interrupt
+
+	TCCR1A = TCCR1B = 0; // mode 0
 }
 
 /**
@@ -63,6 +81,7 @@ ISR(PCINT2_vect) {
  * -  Utility Functions --------------------------------------------------------
  * ==============================================================================
  */
+
 uint8_t log2(uint8_t n) {
 	uint8_t ret = 0;
 	while (n > 0) {
@@ -88,30 +107,85 @@ uint8_t getKeydown(uint8_t offset) {
 	return 0x00;
 }
 
-void playFreq(uint16_t freq) {
-	OCR1A = static_cast<uint16_t>(
-	    CLK_FREQ / static_cast<float>(PRESCALE * freq) - 1);
-	TCCR1A |= (1 << COM1A0);  // enable hardware toggle on pin 11
+void stopFreq() {
+	TCCR3A &= ~(1 << COM3A0); 	// disconnect timer from pin
+	PORTE &= ~(1 << PORTE3); 	// pull pin down
 }
 
-void stopFreq() {
-	TCCR1A &= ~(1 << COM1A0);
-	PORTB &= ~(1 << PORTB5);
+void playFreq(uint16_t freq) {
+	if (freq == 0) {
+		stopFreq();
+	} else {
+		TCNT3 = 0; // set timer counter register to bottom 
+		OCR3A = static_cast<uint16_t>(
+			CLK_FREQ / static_cast<float>(2 * PRESCALE * freq) - 1);
+		TCCR3A |= (1 << COM3A0);  // enable hardware toggle on OC3A
+	}
+}
+
+// Triggers timer 1 ISR after given delay
+// From 0 to 1048 ms
+void setDelay(uint16_t ms) {
+	TCNT1 = 0xFFFF - ((ms*1e3)/16 - 1); // TCNT1 = TOP - counts
+  	TCCR1B |= (1 << CS12); 				// set prescaler of 256
+}
+
+// Plays one note in song then starts delay for note duration
+// Designed to be used by delay ISR
+void playNote(const NoteContainer* song) {
+	playFreq(song[ni].freq); 		// play next note
+	setDelay(song[ni].duration); 	// set duration of note
 }
 
 void playSong(const NoteContainer* song, uint8_t length) {
-	for (uint8_t i = 0; i < length; i++) {
-		uint16_t total = song[i].duration;
+	cli();
+	TCCR1B &= ~(1 << CS12); // stop delay timer
+	stopFreq();
+	ni = 0; // reset note index
+	curSong = song;
+	curLen = length;
+	gap = false; // clear gap
+	sei();
+	setDelay(1); // trigger the interrupt to start song
+	Serial.println("Playing song");
+}
 
-		if (song[i].freq > 0) {
-			uint16_t actual = static_cast<uint16_t>(total * 0.90);
-			playFreq(song[i].freq);
-			delay(actual);
-			stopFreq();
-			delay(total - actual);
-		} else {
-			delay(total);
+/**
+ * ==============================================================================
+ * -  Interrupt Service Routines -----------------------------------------------
+ * ==============================================================================
+ */
+
+ISR(PCINT2_vect) {
+	unsigned long currInterrupt = micros();
+
+	if (!intTriggered && currInterrupt - lastInterrupt > DEB_THRESH) {
+		uint8_t curr = PINK;
+		changed = curr ^ prev;
+		prev = curr;
+
+		intTriggered = true;  // do not enable interrupts until processed
+		lastInterrupt = currInterrupt;
+	}
+}
+
+ISR(TIMER1_OVF_vect) {
+	TCCR1B &= ~(1 << CS12); // stop timer 1
+
+	if (gap) {
+		stopFreq();		// stop note
+		setDelay(GAP);	// add gap between notes
+		gap = false;	// clear gap to play note after delay
+	} else {
+		if (ni >= curLen) {
+			stopFreq(); 	// stop playing
+			ni = SONG_OVER;	// set note index to notify end of song
+			return;			// exit ISR
 		}
+		playNote(curSong);
+
+		ni++; // advance note index
+		gap = true; // set gap for next note
 	}
 }
 
@@ -120,24 +194,21 @@ void playSong(const NoteContainer* song, uint8_t length) {
  * -  Arduino Built-Ins --------------------------------------------------------
  * ==============================================================================
  */
+
 void setup() {
 	cli();
 	DDRK = 0x0F;   // configures direction (input/output)
 	PORTK = 0xF0;  // writes output state OR enables internal pull-up resistors
-	sei();
 
 	// enable pin change interrupts for Port K
 	PCICR |= (1 << PCIE2);
 	PCMSK2 = 0xF0;
 
-	// Set Pin 11 (PB5) as output
-	DDRB |= (1 << DDB5);
+	Serial.begin(9600);
 
-	// Timer 1 control registers
-	TCCR1A = 0;
-	TCCR1B = 0;
-	TCNT1 = 0;
-	TCCR1B |= (1 << WGM12) | (1 << CS10);
+	initFreqTimer();
+	initDelayTimer();
+	sei();
 }
 
 void loop() {
@@ -151,11 +222,9 @@ void loop() {
 		uint8_t kmr = log2(row) - 1;  // key map row
 		sei();
 		if (kmc < 0 || kmc >= 4 || kmr < 0 || kmr >= 4) {
-			stopFreq();
 			return;
 		}
 
-		playingSong = true;
 		char key = MAP[log2(row) - 1][log2(col) - 1];
 		switch (key) {
 			case '1':
@@ -173,6 +242,10 @@ void loop() {
 			default:
 				break;
 		}
-		playingSong = false;
+	}
+
+	if (ni == SONG_OVER) {
+		Serial.println("Finished song");
+		ni = 0;
 	}
 }
