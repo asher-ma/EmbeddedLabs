@@ -46,10 +46,11 @@ static volatile bool intTriggered = false;
  * =============================================================================
  */
 
+volatile bool delayOver = false;
 const NoteContainer* curSong;
 uint8_t curLen;
-volatile uint8_t ni = 0; // Note index
-volatile bool gap = true;
+uint8_t ni = 0; // Note index
+bool gap = true;
 
 /**
  * =============================================================================
@@ -128,13 +129,29 @@ void playFreq(uint16_t freq) {
 void setDelay(uint16_t ms) {
 	TCNT1 = 0xFFFF - ((ms*1e3)/16 - 1); // TCNT1 = TOP - counts
   	TCCR1B |= (1 << CS12); 				// set prescaler of 256
+	delayOver = false;
 }
 
 // Plays one note in song then starts delay for note duration
 // Designed to be used by delay ISR
-void playNote(const NoteContainer* song) {
-	playFreq(song[ni].freq); 		// play next note
-	setDelay(song[ni].duration); 	// set duration of note
+void playNote() {
+	if (gap) {
+		stopFreq();		// stop note
+		setDelay(GAP);	// add gap between notes
+		gap = false;	// clear gap to play note after delay
+	} else {
+		if (ni >= curLen) {
+			stopFreq(); 	// stop playing
+			ni = SONG_OVER;	// set note index to notify end of song
+			delayOver = false;
+			return;			// exit ISR
+		}
+		playFreq(curSong[ni].freq); 		// play next note
+		setDelay(curSong[ni].duration); 	// set duration of note
+
+		ni++; // advance note index
+		gap = true; // set gap for next note
+	}
 }
 
 void playSong(const NoteContainer* song, uint8_t length) {
@@ -146,11 +163,11 @@ void playSong(const NoteContainer* song, uint8_t length) {
 	curLen = length;
 	gap = false; // clear gap
 	sei();
-	setDelay(1); // trigger the interrupt to start song
+	playNote(); // play first note
 	Serial.println("Playing song");
 }
 
-/**
+/** 
  * ==============================================================================
  * -  Interrupt Service Routines -----------------------------------------------
  * ==============================================================================
@@ -172,21 +189,7 @@ ISR(PCINT2_vect) {
 ISR(TIMER1_OVF_vect) {
 	TCCR1B &= ~(1 << CS12); // stop timer 1
 
-	if (gap) {
-		stopFreq();		// stop note
-		setDelay(GAP);	// add gap between notes
-		gap = false;	// clear gap to play note after delay
-	} else {
-		if (ni >= curLen) {
-			stopFreq(); 	// stop playing
-			ni = SONG_OVER;	// set note index to notify end of song
-			return;			// exit ISR
-		}
-		playNote(curSong);
-
-		ni++; // advance note index
-		gap = true; // set gap for next note
-	}
+	delayOver = true; // set flag to indicate delay is over
 }
 
 /**
@@ -242,6 +245,10 @@ void loop() {
 			default:
 				break;
 		}
+	}
+
+	if (delayOver) {
+		playNote();
 	}
 
 	if (ni == SONG_OVER) {
