@@ -29,16 +29,11 @@ static constexpr char MAP[4][4] = {{'1', '2', '3', 'A'},
  * -  Constants  ---------------------------------------------------------------
  * =============================================================================
  */
+
 static constexpr double CLK_FREQ = 16e6;      // 16 MHz
 static constexpr uint16_t DEB_THRESH = 50000;  // 50 ms
 static constexpr uint16_t PRESCALE = 64;
 static constexpr uint8_t GAP = 20; // Gap between notes in ms
-static constexpr uint8_t SONG_OVER = 255;
-
-static volatile unsigned long lastInterrupt = 0;
-static volatile uint8_t prev = 0xF0;     // assume all high
-static volatile uint8_t changed = 0x00;  // assume no change
-static volatile bool intTriggered = false;
 
 /**
  * =============================================================================
@@ -46,11 +41,21 @@ static volatile bool intTriggered = false;
  * =============================================================================
  */
 
+static volatile unsigned long lastInterrupt = 0;
+static volatile uint8_t prev = 0xF0;     // assume all high
+static volatile uint8_t changed = 0x00;  // assume no change
+static volatile bool intTriggered = false;
+
 volatile bool delayOver = false;
 const NoteContainer* curSong;
-uint8_t curLen;
+uint8_t curSongLen;
 uint8_t ni = 0; // Note index
-bool gap = true;
+
+enum class PlaybackState {
+	Stopped, Playing, Gap
+};
+
+volatile PlaybackState state = PlaybackState::Stopped;
 
 /**
  * =============================================================================
@@ -132,38 +137,16 @@ void setDelay(uint16_t ms) {
 	delayOver = false;
 }
 
-// Plays one note in song then starts delay for note duration
-// Designed to be used by delay ISR
-void playNote() {
-	if (gap) {
-		stopFreq();		// stop note
-		setDelay(GAP);	// add gap between notes
-		gap = false;	// clear gap to play note after delay
-	} else {
-		if (ni >= curLen) {
-			stopFreq(); 	// stop playing
-			ni = SONG_OVER;	// set note index to notify end of song
-			delayOver = false;
-			return;			// exit ISR
-		}
-		playFreq(curSong[ni].freq); 		// play next note
-		setDelay(curSong[ni].duration); 	// set duration of note
-
-		ni++; // advance note index
-		gap = true; // set gap for next note
-	}
-}
-
 void playSong(const NoteContainer* song, uint8_t length) {
 	cli();
 	TCCR1B &= ~(1 << CS12); // stop delay timer
 	stopFreq();
 	ni = 0; // reset note index
 	curSong = song;
-	curLen = length;
-	gap = false; // clear gap
+	curSongLen = length;
+	state = PlaybackState::Gap;
+	delayOver = true;
 	sei();
-	playNote(); // play first note
 	Serial.println("Playing song");
 }
 
@@ -248,11 +231,28 @@ void loop() {
 	}
 
 	if (delayOver) {
-		playNote();
-	}
-
-	if (ni == SONG_OVER) {
-		Serial.println("Finished song");
-		ni = 0;
+		delayOver = false;
+		switch (state) {
+			case PlaybackState::Stopped:
+				break;
+			case PlaybackState::Gap:
+				if (ni >= curSongLen) { // song is over
+					stopFreq();
+					ni = 0;
+					Serial.println("Finished song");
+					state = PlaybackState::Stopped;
+				} else {
+					playFreq(curSong[ni].freq); 	// play next note
+					setDelay(curSong[ni].duration); // set duration of note
+					ni++; // advance note index
+					state = PlaybackState::Playing;
+				}
+				break;
+			case PlaybackState::Playing:
+				stopFreq();		// stop note
+				setDelay(GAP);	// add gap between notes
+				state = PlaybackState::Gap;
+				break;
+		}
 	}
 }
