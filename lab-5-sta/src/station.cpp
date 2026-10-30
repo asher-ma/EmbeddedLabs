@@ -2,8 +2,11 @@
 #include <WiFi.h>
 
 // local WiFi hotspot (replace with your own info)
-constexpr char* ssid = "USSGSSMASTER-X";
-constexpr char* password = "446Kq?08";
+constexpr char* ssid = "LAB5_ACCESS_POINT";
+constexpr char* password = nullptr;
+
+WiFiClient client;
+IPAddress serverIP;
 
 void getNetworkInfo() {
 	if (WiFi.status() == WL_CONNECTED) {
@@ -13,6 +16,7 @@ void getNetworkInfo() {
 		Serial.println("[+] BSSID : " + WiFi.BSSIDstr());
 		Serial.print("[+] Gateway IP : ");
 		Serial.println(WiFi.gatewayIP());
+		serverIP = WiFi.gatewayIP();
 		Serial.print("[+] Subnet Mask : ");
 		Serial.println(WiFi.subnetMask());
 		Serial.println((String) "[+] RSSI : " + WiFi.RSSI() + " dB");
@@ -43,8 +47,14 @@ void setup() {
 	Serial.println(WiFi.localIP());
 
 	getNetworkInfo();
+	client.connect(serverIP, 80);
 }
 
 void loop() {
-	// TODO loop
+	if(client.connected()) {
+		client.print("Message from ");
+		client.print(WiFi.localIP());
+		client.print("\n");
+	}
+	delay(5000);
 }
