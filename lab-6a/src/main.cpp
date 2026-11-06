@@ -1,7 +1,7 @@
 #include <Arduino.h>
 
-static constexpr uint16_t PULSE_MIN = 2000U;
-static constexpr uint16_t PULSE_MAX = 4000U;
+static constexpr uint16_t PULSE_MIN = 1000U;
+static constexpr uint16_t PULSE_MAX = 5000U;
 static constexpr uint16_t PULSE_MID = 3000U;
 
 static inline void initTimer1Servo(void) {
@@ -35,7 +35,7 @@ void setup() {
 	Serial.begin(115200);
 
 	Serial.println("Welcome to the Servo Demo");
-	delay(3000);
+	delay(1000);
 
 	showOff();
 }
